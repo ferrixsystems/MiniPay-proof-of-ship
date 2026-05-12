@@ -1,4 +1,4 @@
-export const APP_NAME = 'Pix2Celo Recarga'
+export const APP_NAME = 'Pix2Celo Pay'
 
 export const CELO_CHAIN_ID_HEX = '0xa4ec'
 

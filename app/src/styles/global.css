@@ -3,8 +3,6 @@
 :root {
   --bg-1: #040b13;
   --bg-2: #0a1d31;
-  --card: #081423;
-  --card-2: #0c1d31;
   --text: #e7eff8;
   --muted: #95a9bd;
   --line: #1f3a56;
@@ -35,7 +33,7 @@ body {
 }
 
 .card {
-  width: min(620px, 100%);
+  width: min(640px, 100%);
   background: linear-gradient(180deg, rgba(12, 29, 49, 0.78), rgba(8, 20, 35, 0.94));
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -78,25 +76,87 @@ h1 {
   font-size: 20px;
 }
 
-.walletCard {
-  background: rgba(12, 33, 52, 0.6);
+.walletPanel {
+  background: rgba(12, 33, 52, 0.62);
   border: 1px solid #254560;
   border-radius: 14px;
-  padding: 12px;
+  padding: 14px;
   margin-bottom: 14px;
 }
 
-.walletRow {
+.walletHead {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  color: #acc2d6;
-  padding: 4px 2px;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
 }
 
-.walletRow strong {
-  color: #ebf6ff;
-  font-weight: 600;
+.walletIdentity {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.statusDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.statusDot.online {
+  background: #36e39a;
+  box-shadow: 0 0 0 5px rgba(54, 227, 154, 0.18);
+}
+
+.statusDot.offline {
+  background: #7e8ea0;
+}
+
+.walletTitle {
+  margin: 0;
+  font-size: 13px;
+  color: #9db4c9;
+}
+
+.walletAddress {
+  font-size: 18px;
+  color: #f0f6fd;
+}
+
+.connectBtn {
+  width: auto;
+  min-width: 170px;
+  background: linear-gradient(90deg, rgba(46, 196, 137, 0.2), rgba(46, 196, 137, 0.35));
+  border: 1px solid #2f6f55;
+  color: #ccffe8;
+  font-weight: 700;
+}
+
+.walletGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.walletGrid > div {
+  background: #0b1f33;
+  border: 1px solid #274967;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metaLabel {
+  font-size: 12px;
+  color: #91a9be;
+}
+
+.walletGrid strong {
+  color: #e4f1fe;
 }
 
 label {
@@ -136,10 +196,6 @@ button:disabled {
   border: 0;
   font-weight: 700;
   margin-top: 12px;
-}
-
-.primary.ghost {
-  background: linear-gradient(90deg, rgba(46, 196, 137, 0.72), rgba(46, 196, 137, 0.86));
 }
 
 .row {
@@ -212,9 +268,18 @@ button:disabled {
     font-size: 18px;
   }
 
-  .walletRow {
+  .walletHead {
     flex-direction: column;
-    gap: 2px;
+    align-items: stretch;
+  }
+
+  .connectBtn {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .walletGrid {
+    grid-template-columns: 1fr;
   }
 
   .txActions {
