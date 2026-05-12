@@ -1,37 +1,197 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap');
+
 :root {
-  --bg: #07121d;
-  --card: #0e1f2f;
-  --text: #e7f3ff;
-  --muted: #96aec3;
-  --accent: #19c37d;
+  --bg-1: #040b13;
+  --bg-2: #0a1d31;
+  --card: #081423;
+  --card-2: #0c1d31;
+  --text: #e7eff8;
+  --muted: #95a9bd;
+  --line: #1f3a56;
+  --accent: #2ec489;
+  --accent-dark: #1ca16e;
+  --danger: #ff8c8c;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
-  font-family: "Sora", "Segoe UI", sans-serif;
-  background: radial-gradient(circle at 20% 20%, #163654 0%, var(--bg) 45%);
+  font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
   color: var(--text);
+  background:
+    radial-gradient(850px 400px at 10% 10%, rgba(70, 143, 214, 0.24), transparent 70%),
+    radial-gradient(600px 380px at 90% 100%, rgba(46, 196, 137, 0.14), transparent 70%),
+    linear-gradient(135deg, var(--bg-2), var(--bg-1));
 }
+
 .container {
   min-height: 100vh;
   display: grid;
   place-items: center;
   padding: 20px;
 }
+
 .card {
-  width: min(560px, 100%);
-  background: var(--card);
-  border: 1px solid #2a4358;
-  border-radius: 16px;
+  width: min(580px, 100%);
+  background: linear-gradient(180deg, rgba(12, 29, 49, 0.78), rgba(8, 20, 35, 0.94));
+  border: 1px solid var(--line);
+  border-radius: 18px;
   padding: 24px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(8px);
 }
-.row { display: flex; gap: 8px; margin-bottom: 12px; }
-label { display: block; margin: 12px 0 6px; color: var(--muted); }
-input, select, button { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #2b4a64; background: #0a1722; color: var(--text); }
-button { cursor: pointer; }
-button.primary { background: linear-gradient(90deg, #15b26f, var(--accent)); border: none; color: #032012; font-weight: 700; margin-top: 10px; }
-.chip { width: auto; padding: 8px 14px; }
-.chip.selected { border-color: var(--accent); }
-.ok { color: #76f0be; overflow-wrap: anywhere; }
-.err { color: #ff8a8a; }
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.network,
+.tag {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #2b4c68;
+  color: #b9cee1;
+}
+
+.tag {
+  border-color: #1f6046;
+  color: #9ce8c8;
+}
+
+h1 {
+  margin: 8px 0;
+  font-size: clamp(34px, 7vw, 46px);
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.subtitle {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 20px;
+}
+
+label {
+  display: block;
+  margin: 14px 0 8px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+input,
+select,
+button,
+.secondary,
+.link {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid #2b4a64;
+  background: #081320;
+  color: var(--text);
+  padding: 12px;
+  font-family: inherit;
+  font-size: 16px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.primary {
+  background: linear-gradient(90deg, var(--accent-dark), var(--accent));
+  color: #032012;
+  border: 0;
+  font-weight: 700;
+  margin-top: 12px;
+}
+
+.primary.ghost {
+  background: linear-gradient(90deg, rgba(46, 196, 137, 0.72), rgba(46, 196, 137, 0.86));
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.chip {
+  width: auto;
+  padding: 10px 14px;
+  color: #aac1d8;
+}
+
+.chip.selected {
+  border-color: var(--accent);
+  color: #ddffef;
+  background: rgba(46, 196, 137, 0.12);
+}
+
+.txCard {
+  margin-top: 14px;
+  border: 1px solid #2f5a48;
+  background: rgba(14, 43, 33, 0.45);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.txTitle {
+  margin: 0 0 8px;
+  color: #96f2c9;
+  font-weight: 700;
+}
+
+.txHash {
+  margin: 0;
+  color: #d8e8f7;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.txActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.secondary,
+.link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  border: 1px solid #376389;
+  background: #102135;
+  font-weight: 600;
+}
+
+.err {
+  margin-top: 12px;
+  color: var(--danger);
+}
+
+@media (max-width: 640px) {
+  .card {
+    padding: 18px;
+  }
+
+  .subtitle {
+    font-size: 18px;
+  }
+
+  .txActions {
+    flex-direction: column;
+  }
+}

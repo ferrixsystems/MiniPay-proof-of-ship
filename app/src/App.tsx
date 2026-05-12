@@ -39,6 +39,16 @@ const VAULT_ABI = [
 
 const BRL_VALUES = ['10', '20', '50']
 
+function shortAddress(value: string) {
+  return `${value.slice(0, 6)}...${value.slice(-4)}`
+}
+
+function randomReference(): `0x${string}` {
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `0x${hex}`
+}
+
 export function App() {
   const [account, setAccount] = useState<string>('')
   const [value, setValue] = useState<string>('10')
@@ -46,27 +56,40 @@ export function App() {
   const [note, setNote] = useState<string>('Recarga Pix2Celo')
   const [txHash, setTxHash] = useState<string>('')
   const [loading, setLoading] = useState<boolean>(false)
+  const [copied, setCopied] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
 
   const token = useMemo(() => TOKENS.find((t) => t.symbol === tokenSymbol), [tokenSymbol])
+  const txUrl = txHash ? `https://celoscan.io/tx/${txHash}` : ''
 
   async function connect() {
     setError('')
     if (!window.ethereum) {
-      setError('MiniPay/Wallet não detectada.')
+      setError('MiniPay/Wallet nao detectada.')
       return
     }
 
-    const chainId = await window.ethereum.request({ method: 'eth_chainId' })
-    if (chainId !== CELO_CHAIN_ID_HEX) {
-      await window.ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: CELO_CHAIN_ID_HEX }]
-      })
-    }
+    try {
+      const chainId = await window.ethereum.request({ method: 'eth_chainId' })
+      if (chainId !== CELO_CHAIN_ID_HEX) {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: CELO_CHAIN_ID_HEX }]
+        })
+      }
 
-    const [addr] = await window.ethereum.request({ method: 'eth_requestAccounts' })
-    setAccount(addr)
+      const [addr] = await window.ethereum.request({ method: 'eth_requestAccounts' })
+      setAccount(addr)
+    } catch (e: any) {
+      setError(e?.message || 'Falha ao conectar carteira.')
+    }
+  }
+
+  async function copyTxHash() {
+    if (!txHash) return
+    await navigator.clipboard.writeText(txHash)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
   }
 
   async function pay() {
@@ -75,7 +98,7 @@ export function App() {
 
     if (!window.ethereum || !account) return
     if (!token || !token.address || !CONTRACT_ADDRESS) {
-      setError('Configure VITE_USDC_ADDRESS/VITE_USDT_ADDRESS e VITE_CONTRACT_ADDRESS.')
+      setError('Configure VITE_USDC_ADDRESS, VITE_USDT_ADDRESS e VITE_CONTRACT_ADDRESS.')
       return
     }
 
@@ -92,23 +115,26 @@ export function App() {
       })
 
       const amount = parseUnits(value, token.decimals)
-      const reference = (`0x${crypto.randomUUID().replace(/-/g, '').slice(0, 64)}`).padEnd(66, '0') as `0x${string}`
+      const reference = randomReference()
+      const accountAddress = account as `0x${string}`
+      const tokenAddress = token.address as `0x${string}`
+      const contractAddress = CONTRACT_ADDRESS as `0x${string}`
 
       const approveHash = await walletClient.writeContract({
-        account: account as `0x`,
-        address: token.address as `0x`,
+        account: accountAddress,
+        address: tokenAddress,
         abi: ERC20_ABI,
         functionName: 'approve',
-        args: [CONTRACT_ADDRESS as `0x${string}`, amount]
+        args: [contractAddress, amount]
       })
       await publicClient.waitForTransactionReceipt({ hash: approveHash })
 
       const payHash = await walletClient.writeContract({
-        account: account as `0x`,
-        address: CONTRACT_ADDRESS as `0x`,
+        account: accountAddress,
+        address: contractAddress,
         abi: VAULT_ABI,
         functionName: 'pay',
-        args: [token.address as `0x${string}`, amount, reference, note]
+        args: [tokenAddress, amount, reference, note]
       })
 
       await publicClient.waitForTransactionReceipt({ hash: payHash })
@@ -123,10 +149,17 @@ export function App() {
   return (
     <main className="container">
       <section className="card">
-        <h1>{APP_NAME}</h1>
-        <p>Recarga e pagamento estável em USDC/USDT com comprovante onchain na Celo.</p>
+        <div className="topbar">
+          <span className="network">Celo Mainnet</span>
+          <span className="tag">MiniPay Ready</span>
+        </div>
 
-        <button onClick={connect} className="primary">{account ? `Conectado: ${account.slice(0, 6)}...${account.slice(-4)}` : 'Conectar MiniPay'}</button>
+        <h1>{APP_NAME}</h1>
+        <p className="subtitle">Recarga e pagamento estavel em USDC/USDT com comprovante onchain.</p>
+
+        <button onClick={connect} className="primary ghost">
+          {account ? `Conectado: ${shortAddress(account)}` : 'Conectar MiniPay'}
+        </button>
 
         <label>Valor (BRL)</label>
         <div className="row">
@@ -140,18 +173,30 @@ export function App() {
         <label>Token</label>
         <select value={tokenSymbol} onChange={(e) => setTokenSymbol(e.target.value)}>
           {TOKENS.map((t) => (
-            <option key={t.symbol} value={t.symbol}>{t.symbol}</option>
+            <option key={t.symbol} value={t.symbol}>
+              {t.symbol}
+            </option>
           ))}
         </select>
 
-        <label>Descrição</label>
+        <label>Descricao</label>
         <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={120} />
 
         <button disabled={!account || loading} onClick={pay} className="primary">
-          {loading ? 'Processando...' : 'Pagar Agora'}
+          {loading ? 'Processando transacao...' : 'Pagar Agora'}
         </button>
 
-        {txHash && <p className="ok">Tx: {txHash}</p>}
+        {txHash && (
+          <div className="txCard">
+            <p className="txTitle">Pagamento confirmado</p>
+            <p className="txHash">{txHash}</p>
+            <div className="txActions">
+              <button className="secondary" onClick={copyTxHash}>{copied ? 'Copiado' : 'Copiar hash'}</button>
+              <a className="secondary link" href={txUrl} target="_blank" rel="noreferrer">Ver no CeloScan</a>
+            </div>
+          </div>
+        )}
+
         {error && <p className="err">{error}</p>}
       </section>
     </main>
