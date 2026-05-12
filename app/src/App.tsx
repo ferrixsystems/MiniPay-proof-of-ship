@@ -1,7 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPublicClient, createWalletClient, custom, http, parseUnits } from 'viem'
 import { celo } from 'viem/chains'
 import { APP_NAME, CELO_CHAIN_ID_HEX, CONTRACT_ADDRESS, TOKENS } from './lib/config'
+import type { ConnectStep, FeedStatus, LivePayment, TokenMeta } from './lib/types'
+import { getWalletName, getNetworkLabel, isAddress, randomReference, toUserError } from './lib/utils'
+import { ConnectModal } from './components/ConnectModal'
+import { LiveBoard } from './components/LiveBoard'
+import { PaymentForm } from './components/PaymentForm'
+import { PurposeBox } from './components/PurposeBox'
+import { TxReceipt } from './components/TxReceipt'
+import { WalletPanel } from './components/WalletPanel'
 
 declare global {
   interface Window {
@@ -24,6 +32,17 @@ const ERC20_ABI = [
 
 const VAULT_ABI = [
   {
+    type: 'event',
+    name: 'PaymentReceived',
+    inputs: [
+      { indexed: true, name: 'payer', type: 'address' },
+      { indexed: true, name: 'token', type: 'address' },
+      { indexed: false, name: 'amount', type: 'uint256' },
+      { indexed: true, name: 'paymentRef', type: 'bytes32' },
+      { indexed: false, name: 'note', type: 'string' }
+    ]
+  },
+  {
     type: 'function',
     name: 'pay',
     stateMutability: 'nonpayable',
@@ -38,56 +57,76 @@ const VAULT_ABI = [
 ] as const
 
 const QUICK_AMOUNTS = ['1', '5', '10', '20']
-
-function shortAddress(value: string) {
-  return `${value.slice(0, 6)}...${value.slice(-4)}`
-}
-
-function randomReference(): `0x${string}` {
-  const bytes = crypto.getRandomValues(new Uint8Array(32))
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-  return `0x${hex}`
-}
-
-function getWalletName(ethereum: any): string {
-  if (!ethereum) return 'Not detected'
-  if (ethereum.isMiniPay) return 'MiniPay'
-  if (ethereum.isRabby) return 'Rabby'
-  if (ethereum.isMetaMask) return 'MetaMask'
-  return 'Injected wallet'
-}
-
-function getNetworkLabel(chainId: string): string {
-  if (chainId?.toLowerCase() === CELO_CHAIN_ID_HEX) return 'Celo Mainnet'
-  return `Chain ${chainId}`
-}
-
-function toUserError(error: any): string {
-  if (error?.code === 4001) return 'Request was canceled in your wallet.'
-  const raw = String(error?.shortMessage || error?.message || '')
-  if (/user rejected|denied/i.test(raw)) return 'Request was canceled in your wallet.'
-  if (/insufficient funds/i.test(raw)) return 'Insufficient balance to pay gas or token amount.'
-  return raw || 'Payment failed.'
-}
+const AUTO_REFRESH_MS = 8_000
+const INITIAL_BLOCK_WINDOW = 20_000n
+const SLIDES_PER_PAGE = 4
+const SLIDE_MS = 3000
 
 export function App() {
-  const [account, setAccount] = useState<string>('')
-  const [amount, setAmount] = useState<string>('1')
-  const [tokenSymbol, setTokenSymbol] = useState<string>('USDC')
-  const [note, setNote] = useState<string>('Top up via Celo Stable Pay')
-  const [walletName, setWalletName] = useState<string>('Not connected')
-  const [networkName, setNetworkName] = useState<string>('Unknown')
-  const [txHash, setTxHash] = useState<string>('')
-  const [loading, setLoading] = useState<boolean>(false)
-  const [connecting, setConnecting] = useState<boolean>(false)
-  const [copied, setCopied] = useState<boolean>(false)
-  const [error, setError] = useState<string>('')
+  const [account, setAccount] = useState('')
+  const [amount, setAmount] = useState('1')
+  const [tokenSymbol, setTokenSymbol] = useState('USDC')
+  const [note, setNote] = useState('Top up via Celo Stable Pay')
+  const [walletName, setWalletName] = useState('Not connected')
+  const [networkName, setNetworkName] = useState('Unknown')
+  const [txHash, setTxHash] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [connecting, setConnecting] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState('')
+  const [connectModalOpen, setConnectModalOpen] = useState(false)
+  const [connectStep, setConnectStep] = useState<ConnectStep>('select')
+
+  const [livePayments, setLivePayments] = useState<LivePayment[]>([])
+  const [feedStatus, setFeedStatus] = useState<FeedStatus>('idle')
+  const [feedError, setFeedError] = useState('')
+  const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null)
+  const [clock, setClock] = useState(Date.now())
+  const [slideIndex, setSlideIndex] = useState(0)
+
+  const lastScannedBlockRef = useRef<bigint | null>(null)
 
   const token = useMemo(() => TOKENS.find((t) => t.symbol === tokenSymbol), [tokenSymbol])
   const txUrl = txHash ? `https://celoscan.io/tx/${txHash}` : ''
   const connected = Boolean(account)
 
-  async function connect() {
+  const tokenByAddress = useMemo(() => {
+    const map = new Map<string, TokenMeta>()
+    TOKENS.forEach((t) => map.set(t.address.toLowerCase(), t))
+    return map
+  }, [])
+
+  const topSenders = useMemo(() => {
+    if (!token?.address) return []
+    const selected = token.address.toLowerCase()
+    const acc = new Map<string, bigint>()
+
+    for (const payment of livePayments) {
+      if (payment.token.toLowerCase() !== selected) continue
+      acc.set(payment.payer, (acc.get(payment.payer) || 0n) + payment.amount)
+    }
+
+    return Array.from(acc.entries())
+      .map(([payer, total]) => ({ payer, total }))
+      .sort((a, b) => (a.total > b.total ? -1 : 1))
+      .slice(0, 5)
+  }, [livePayments, token])
+
+  const pages = useMemo(() => {
+    const groups: LivePayment[][] = []
+    for (let i = 0; i < livePayments.length; i += SLIDES_PER_PAGE) groups.push(livePayments.slice(i, i + SLIDES_PER_PAGE))
+    return groups
+  }, [livePayments])
+
+  const pageCount = Math.max(1, pages.length)
+
+  function openConnectModal() {
+    setError('')
+    setConnectStep('select')
+    setConnectModalOpen(true)
+  }
+
+  async function connectWallet() {
     setError('')
     if (!window.ethereum) {
       setError('MiniPay or browser wallet extension was not found.')
@@ -95,26 +134,25 @@ export function App() {
     }
 
     setConnecting(true)
+    setConnectStep('confirming')
     try {
-      const providerName = getWalletName(window.ethereum)
-      setWalletName(providerName)
+      setWalletName(getWalletName(window.ethereum))
 
       let chainId = await window.ethereum.request({ method: 'eth_chainId' })
       if (chainId !== CELO_CHAIN_ID_HEX) {
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: CELO_CHAIN_ID_HEX }]
-        })
+        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CELO_CHAIN_ID_HEX }] })
         chainId = CELO_CHAIN_ID_HEX
       }
 
       const [addr] = await window.ethereum.request({ method: 'eth_requestAccounts' })
       setAccount(addr)
       setNetworkName(getNetworkLabel(chainId))
+      setConnectModalOpen(false)
     } catch (e: any) {
       setError(toUserError(e))
     } finally {
       setConnecting(false)
+      setConnectStep('select')
     }
   }
 
@@ -141,15 +179,8 @@ export function App() {
 
     setLoading(true)
     try {
-      const walletClient = createWalletClient({
-        chain: celo,
-        transport: custom(window.ethereum)
-      })
-
-      const publicClient = createPublicClient({
-        chain: celo,
-        transport: http()
-      })
+      const walletClient = createWalletClient({ chain: celo, transport: custom(window.ethereum) })
+      const publicClient = createPublicClient({ chain: celo, transport: http() })
 
       const parsedAmount = parseUnits(amount, token.decimals)
       const reference = randomReference()
@@ -173,7 +204,6 @@ export function App() {
         functionName: 'pay',
         args: [tokenAddress, parsedAmount, reference, note]
       })
-
       await publicClient.waitForTransactionReceipt({ hash: payHash })
       setTxHash(payHash)
     } catch (e: any) {
@@ -182,6 +212,151 @@ export function App() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (slideIndex > pageCount - 1) setSlideIndex(0)
+  }, [pageCount, slideIndex])
+
+  useEffect(() => {
+    if (pageCount <= 1) return
+    const id = setInterval(() => setSlideIndex((prev) => (prev + 1) % pageCount), SLIDE_MS)
+    return () => clearInterval(id)
+  }, [pageCount])
+
+  useEffect(() => {
+    const timer = setInterval(() => setClock(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    if (!isAddress(CONTRACT_ADDRESS)) {
+      setFeedStatus('idle')
+      setFeedError('Set VITE_CONTRACT_ADDRESS to enable the live feed.')
+      return
+    }
+
+    let active = true
+    const publicClient = createPublicClient({ chain: celo, transport: http() })
+    const contractAddress = CONTRACT_ADDRESS as `0x${string}`
+
+    async function mapLogs(logs: any[]): Promise<LivePayment[]> {
+      const uniqueBlocks = Array.from(
+        new Set(
+          logs
+            .map((log) => log.blockNumber as bigint | null)
+            .filter((blockNumber): blockNumber is bigint => blockNumber !== null)
+            .map((blockNumber) => blockNumber.toString())
+        )
+      ).map((n) => BigInt(n))
+
+      const blockTimeMap = new Map<bigint, number>()
+      await Promise.all(
+        uniqueBlocks.map(async (blockNumber) => {
+          const block = await publicClient.getBlock({ blockNumber })
+          blockTimeMap.set(blockNumber, Number(block.timestamp) * 1000)
+        })
+      )
+
+      return logs
+        .map((log) => {
+          const args = log.args as { payer?: `0x${string}`; token?: `0x${string}`; amount?: bigint; note?: string }
+          if (!args.payer || !args.token || typeof args.amount !== 'bigint') return null
+          if (!log.transactionHash || log.blockNumber === null) return null
+
+          return {
+            txHash: log.transactionHash,
+            logIndex: Number(log.logIndex ?? 0),
+            blockNumber: log.blockNumber,
+            blockTimestampMs: blockTimeMap.get(log.blockNumber) || Date.now(),
+            payer: args.payer,
+            token: args.token,
+            amount: args.amount,
+            note: args.note || ''
+          } satisfies LivePayment
+        })
+        .filter((value): value is LivePayment => value !== null)
+    }
+
+    async function fetchInitial() {
+      try {
+        setFeedStatus('syncing')
+        setFeedError('')
+
+        const latestBlock = await publicClient.getBlockNumber()
+        const fromBlock = latestBlock > INITIAL_BLOCK_WINDOW ? latestBlock - INITIAL_BLOCK_WINDOW : 0n
+
+        const logs = await publicClient.getLogs({
+          address: contractAddress,
+          event: VAULT_ABI[0],
+          fromBlock,
+          toBlock: latestBlock
+        })
+
+        const mapped = await mapLogs(logs)
+        mapped.sort((a, b) => (a.blockNumber === b.blockNumber ? b.logIndex - a.logIndex : a.blockNumber > b.blockNumber ? -1 : 1))
+
+        if (!active) return
+        setLivePayments(mapped.slice(0, 40))
+        setLastRefreshAt(Date.now())
+        setFeedStatus('live')
+        lastScannedBlockRef.current = latestBlock
+      } catch (e: any) {
+        if (!active) return
+        setFeedStatus('error')
+        setFeedError(toUserError(e))
+      }
+    }
+
+    async function pollNew() {
+      try {
+        const latestBlock = await publicClient.getBlockNumber()
+        const lastScanned = lastScannedBlockRef.current
+
+        if (lastScanned === null || latestBlock <= lastScanned) {
+          lastScannedBlockRef.current = latestBlock
+          setLastRefreshAt(Date.now())
+          return
+        }
+
+        const logs = await publicClient.getLogs({
+          address: contractAddress,
+          event: VAULT_ABI[0],
+          fromBlock: lastScanned + 1n,
+          toBlock: latestBlock
+        })
+
+        const mapped = await mapLogs(logs)
+        if (!active) return
+
+        if (mapped.length > 0) {
+          setLivePayments((previous) => {
+            const merged = [...mapped, ...previous]
+            const dedupe = new Map<string, LivePayment>()
+            for (const item of merged) dedupe.set(`${item.txHash}:${item.logIndex}`, item)
+            const unique = Array.from(dedupe.values())
+            unique.sort((a, b) => (a.blockNumber === b.blockNumber ? b.logIndex - a.logIndex : a.blockNumber > b.blockNumber ? -1 : 1))
+            return unique.slice(0, 40)
+          })
+        }
+
+        setFeedStatus('live')
+        setLastRefreshAt(Date.now())
+        lastScannedBlockRef.current = latestBlock
+      } catch (e: any) {
+        if (!active) return
+        setFeedStatus('error')
+        setFeedError(toUserError(e))
+      }
+    }
+
+    fetchInitial()
+    const interval = setInterval(pollNew, AUTO_REFRESH_MS)
+
+    return () => {
+      active = false
+      clearInterval(interval)
+    }
+  }, [])
 
   return (
     <main className="container">
@@ -194,76 +369,61 @@ export function App() {
         <h1>{APP_NAME}</h1>
         <p className="subtitle">Stablecoin top-ups and payments in USDC/USDT with an onchain receipt.</p>
 
-        <div className="walletPanel">
-          <div className="walletHead">
-            <div className="walletIdentity">
-              <span className={connected ? 'statusDot online' : 'statusDot offline'} />
-              <div>
-                <p className="walletTitle">Wallet Session</p>
-                <strong className="walletAddress">{connected ? shortAddress(account) : 'Not connected'}</strong>
-              </div>
-            </div>
-            <button onClick={connect} className="connectBtn" disabled={connecting}>
-              {connecting ? 'Connecting...' : connected ? 'Switch Wallet' : 'Connect Wallet'}
-            </button>
-          </div>
+        <PurposeBox />
 
-          <div className="walletGrid">
-            <div>
-              <span className="metaLabel">Provider</span>
-              <strong>{walletName}</strong>
-            </div>
-            <div>
-              <span className="metaLabel">Network</span>
-              <strong>{networkName}</strong>
-            </div>
-          </div>
-        </div>
-
-        <label>Amount ({tokenSymbol})</label>
-        <div className="row">
-          {QUICK_AMOUNTS.map((v) => (
-            <button key={v} className={amount === v ? 'chip selected' : 'chip'} onClick={() => setAmount(v)}>
-              {v} {tokenSymbol}
-            </button>
-          ))}
-        </div>
-        <input
-          inputMode="decimal"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value.replace(/,/g, '.'))}
-          placeholder={`Enter ${tokenSymbol} amount`}
+        <WalletPanel
+          connected={connected}
+          account={account}
+          walletName={walletName}
+          networkName={networkName}
+          connecting={connecting}
+          onConnectClick={openConnectModal}
         />
 
-        <label>Token</label>
-        <select value={tokenSymbol} onChange={(e) => setTokenSymbol(e.target.value)}>
-          {TOKENS.map((t) => (
-            <option key={t.symbol} value={t.symbol}>
-              {t.symbol}
-            </option>
-          ))}
-        </select>
+        <PaymentForm
+          tokenSymbol={tokenSymbol}
+          tokens={TOKENS}
+          amount={amount}
+          note={note}
+          quickAmounts={QUICK_AMOUNTS}
+          loading={loading}
+          connected={connected}
+          onAmountSelect={setAmount}
+          onAmountChange={setAmount}
+          onTokenChange={setTokenSymbol}
+          onNoteChange={setNote}
+          onPay={pay}
+        />
 
-        <label>Description</label>
-        <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={120} />
-
-        <button disabled={!account || loading} onClick={pay} className="primary">
-          {loading ? 'Processing transaction...' : `Pay ${amount || '0'} ${tokenSymbol}`}
-        </button>
-
-        {txHash && (
-          <div className="txCard">
-            <p className="txTitle">Payment confirmed</p>
-            <p className="txHash">{txHash}</p>
-            <div className="txActions">
-              <button className="secondary" onClick={copyTxHash}>{copied ? 'Copied' : 'Copy hash'}</button>
-              <a className="secondary link" href={txUrl} target="_blank" rel="noreferrer">View on CeloScan</a>
-            </div>
-          </div>
-        )}
+        <TxReceipt txHash={txHash} txUrl={txUrl} copied={copied} onCopy={copyTxHash} />
 
         {error && <p className="err">{error}</p>}
       </section>
+
+      <LiveBoard
+        livePayments={livePayments}
+        pages={pages}
+        pageCount={pageCount}
+        slideIndex={slideIndex}
+        setSlideIndex={setSlideIndex}
+        feedStatus={feedStatus}
+        feedError={feedError}
+        autoRefreshSeconds={AUTO_REFRESH_MS / 1000}
+        lastRefreshAt={lastRefreshAt}
+        clock={clock}
+        tokenByAddress={tokenByAddress}
+        tokenSymbol={tokenSymbol}
+        topSenders={topSenders}
+        token={token}
+      />
+
+      <ConnectModal
+        open={connectModalOpen}
+        connecting={connecting}
+        step={connectStep}
+        onClose={() => setConnectModalOpen(false)}
+        onConnectChoice={connectWallet}
+      />
     </main>
   )
 }
