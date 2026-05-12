@@ -16,7 +16,10 @@ export function ConnectModal(props: ConnectModalProps) {
     <div className="modalOverlay" onClick={() => !connecting && onClose()}>
       <div className="connectModal" onClick={(e) => e.stopPropagation()}>
         <div className="modalHead">
-          <h3>Connect Wallet</h3>
+          <div className="modalTitle">
+            <img src="/image.png" alt="" className="modalImage" />
+            <h3>Connect Wallet</h3>
+          </div>
           <button className="closeModal" onClick={() => !connecting && onClose()} disabled={connecting} aria-label="Close">
             ×
           </button>

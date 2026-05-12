@@ -366,7 +366,9 @@ export function App() {
           <span className="tag">MiniPay Ready</span>
         </div>
 
-        <h1>{APP_NAME}</h1>
+        <div className="brandLine">
+          <h1>{APP_NAME}</h1>
+        </div>
         <p className="subtitle">Stablecoin top-ups and payments in USDC/USDT with an onchain receipt.</p>
 
         <PurposeBox />
