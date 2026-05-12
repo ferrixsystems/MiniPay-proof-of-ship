@@ -1,35 +1,28 @@
-# Pix2Celo Recarga - Proof of Ship Submission
+# Celo Stable Pay - Proof of Ship Submission
 
-Mini app para MiniPay que permite pagamentos/recargas em stablecoin (USDC/USDT) e registra comprovante onchain via smart contract na Celo.
+MiniPay-ready stablecoin payment app on Celo Mainnet.
 
-## Objetivo para Proof of Ship
+## What This Project Does
 
-Este projeto foi desenhado para cumprir os requisitos:
+- Lets users pay in `USDC` or `USDT`.
+- Sends payments onchain through a smart contract.
+- Returns a verifiable transaction hash and CeloScan link.
 
-1. Build for MiniPay
-2. Deploy on Celo mainnet
-3. Submit project on Talent
+## Project Structure
 
-## Arquitetura
-
-- `contracts/`: contrato Solidity (`Pix2CeloVault`) para receber pagamento e encaminhar para tesouraria.
-- `app/`: mini app em React + Vite + viem com conexão wallet e fluxo approve + pay.
-- `docs/`: guia de submissão e checklist.
+- `contracts/`: Solidity contract (`Pix2CeloVault`) that forwards funds to treasury.
+- `app/`: React + Vite + viem frontend.
+- `docs/`: submission checklist.
 
 ## Smart Contract
 
-Contrato principal: `contracts/src/Pix2CeloVault.sol`
+Main contract: `contracts/src/Pix2CeloVault.sol`
 
-Funções:
-- `setTreasury(address)`: atualiza carteira recebedora
-- `pay(address token, uint256 amount, bytes32 reference, string note)`: transfere token do usuário para tesouraria e emite evento
+Core methods:
+- `setTreasury(address)`: updates destination wallet.
+- `pay(address token, uint256 amount, bytes32 paymentRef, string note)`: transfers user tokens to treasury and emits event.
 
-Evento emitido:
-- `PaymentReceived(payer, token, amount, reference, note)`
-
-## Rodando localmente
-
-### 1) Frontend
+## Run Locally
 
 ```bash
 cd app
@@ -38,40 +31,19 @@ pnpm install
 pnpm dev
 ```
 
-### 2) Contrato (Foundry)
+## Required Env Vars
 
-```bash
-cd contracts
-forge install OpenZeppelin/openzeppelin-contracts foundry-rs/forge-std
-forge test
+```env
+VITE_CONTRACT_ADDRESS=0x...
+VITE_USDC_ADDRESS=0xcebA9300f2b948710d2653dD7B07f33A8B32118C
+VITE_USDT_ADDRESS=0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e
 ```
 
-## Deploy na Celo Mainnet
+## Deploy Notes
 
-No diretório `contracts`, configure variáveis:
+- Contract must be deployed on **Celo Mainnet (42220)**.
+- Frontend can be deployed on Vercel with root directory `app`.
 
-```bash
-export CELO_RPC_URL="https://forno.celo.org"
-export PRIVATE_KEY="<sua_private_key>"
-export OWNER_ADDRESS="0x..."
-export TREASURY_ADDRESS="0x..."
-```
+## Talent Submission
 
-Deploy:
-
-```bash
-forge script script/Deploy.s.sol:DeployScript --rpc-url $CELO_RPC_URL --broadcast --verify
-```
-
-Depois, coloque o endereço do contrato no `.env` do app (`VITE_CONTRACT_ADDRESS`).
-
-## Compatibilidade MiniPay
-
-- Verifica `window.ethereum`
-- Força rede Celo (`0xa4ec`)
-- Fluxo de pagamento com stablecoin e comprovante de tx hash
-
-## Entrega para Talent
-
-Veja o checklist final em `docs/submission-checklist.md`.
-
+Use `docs/submission-checklist.md` for final submission artifacts.

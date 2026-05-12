@@ -74,7 +74,7 @@ export function App() {
   const [account, setAccount] = useState<string>('')
   const [amount, setAmount] = useState<string>('1')
   const [tokenSymbol, setTokenSymbol] = useState<string>('USDC')
-  const [note, setNote] = useState<string>('Top up via Pix2Celo')
+  const [note, setNote] = useState<string>('Top up via Celo Stable Pay')
   const [walletName, setWalletName] = useState<string>('Not connected')
   const [networkName, setNetworkName] = useState<string>('Unknown')
   const [txHash, setTxHash] = useState<string>('')

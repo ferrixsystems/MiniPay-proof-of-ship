@@ -1,26 +1,24 @@
 # Proof of Ship - Submission Checklist
 
-## Antes de enviar
+## Before Submitting
 
-1. Contrato deployado na Celo mainnet.
-2. Frontend publicado (Vercel/Netlify) com HTTPS.
-3. Transação real de teste executada no app.
-4. README com instruções claras.
-5. Repositório público com código limpo.
+1. Contract deployed on Celo Mainnet.
+2. Frontend live on Vercel/Netlify with HTTPS.
+3. At least one successful mainnet payment transaction.
+4. Public GitHub repository with setup instructions.
 
-## Evidências para anexar no Talent
+## Evidence to Include on Talent
 
-1. Link do app em produção.
-2. Endereço do smart contract na Celo.
-3. Link do repositório GitHub.
-4. Vídeo demo (1 a 2 minutos):
-   - conexão MiniPay
-   - seleção de valor/token
-   - pagamento
-   - hash da transação
-5. Descrição curta de problema + solução + público-alvo.
+1. Live app URL.
+2. Smart contract address (Celo Mainnet).
+3. GitHub repository URL.
+4. Demo video (1-2 min) showing:
+   - wallet connect
+   - token/amount selection
+   - payment confirmation
+   - transaction hash on CeloScan
+5. Short product description.
 
-## Pitch curto sugerido
+## Short Pitch
 
-"Pix2Celo Recarga é um mini app para pagamentos e recargas rápidas em stablecoin dentro do MiniPay. O usuário escolhe valor e token (USDC/USDT), confirma em carteira e recebe comprovante onchain na Celo. O foco é UX mobile-first para pagamentos do dia a dia com baixo custo e liquidação rápida."
-
+"Celo Stable Pay is a MiniPay-ready app for stablecoin payments on Celo. Users pay in USDC/USDT, confirm in wallet, and receive an onchain receipt instantly. The product focuses on low-fee, mobile-first payments."
