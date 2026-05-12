@@ -35,7 +35,7 @@ body {
 }
 
 .card {
-  width: min(580px, 100%);
+  width: min(620px, 100%);
   background: linear-gradient(180deg, rgba(12, 29, 49, 0.78), rgba(8, 20, 35, 0.94));
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -76,6 +76,27 @@ h1 {
   margin: 0 0 18px;
   color: var(--muted);
   font-size: 20px;
+}
+
+.walletCard {
+  background: rgba(12, 33, 52, 0.6);
+  border: 1px solid #254560;
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.walletRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #acc2d6;
+  padding: 4px 2px;
+}
+
+.walletRow strong {
+  color: #ebf6ff;
+  font-weight: 600;
 }
 
 label {
@@ -124,7 +145,7 @@ button:disabled {
 .row {
   display: flex;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .chip {
@@ -189,6 +210,11 @@ button:disabled {
 
   .subtitle {
     font-size: 18px;
+  }
+
+  .walletRow {
+    flex-direction: column;
+    gap: 2px;
   }
 
   .txActions {

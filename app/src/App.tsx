@@ -37,7 +37,7 @@ const VAULT_ABI = [
   }
 ] as const
 
-const BRL_VALUES = ['10', '20', '50']
+const QUICK_AMOUNTS = ['1', '5', '10', '20']
 
 function shortAddress(value: string) {
   return `${value.slice(0, 6)}...${value.slice(-4)}`
@@ -49,11 +49,26 @@ function randomReference(): `0x${string}` {
   return `0x${hex}`
 }
 
+function getWalletName(ethereum: any): string {
+  if (!ethereum) return 'Not detected'
+  if (ethereum.isMiniPay) return 'MiniPay'
+  if (ethereum.isRabby) return 'Rabby'
+  if (ethereum.isMetaMask) return 'MetaMask'
+  return 'Browser wallet'
+}
+
+function getNetworkLabel(chainId: string): string {
+  if (chainId?.toLowerCase() === CELO_CHAIN_ID_HEX) return 'Celo Mainnet'
+  return `Chain ${chainId}`
+}
+
 export function App() {
   const [account, setAccount] = useState<string>('')
-  const [value, setValue] = useState<string>('10')
+  const [amount, setAmount] = useState<string>('1')
   const [tokenSymbol, setTokenSymbol] = useState<string>('USDC')
-  const [note, setNote] = useState<string>('Recarga Pix2Celo')
+  const [note, setNote] = useState<string>('Top up via Pix2Celo')
+  const [walletName, setWalletName] = useState<string>('Not connected')
+  const [networkName, setNetworkName] = useState<string>('Unknown')
   const [txHash, setTxHash] = useState<string>('')
   const [loading, setLoading] = useState<boolean>(false)
   const [copied, setCopied] = useState<boolean>(false)
@@ -65,23 +80,28 @@ export function App() {
   async function connect() {
     setError('')
     if (!window.ethereum) {
-      setError('MiniPay/Wallet nao detectada.')
+      setError('MiniPay or wallet extension not detected.')
       return
     }
 
     try {
-      const chainId = await window.ethereum.request({ method: 'eth_chainId' })
+      const providerName = getWalletName(window.ethereum)
+      setWalletName(providerName)
+
+      let chainId = await window.ethereum.request({ method: 'eth_chainId' })
       if (chainId !== CELO_CHAIN_ID_HEX) {
         await window.ethereum.request({
           method: 'wallet_switchEthereumChain',
           params: [{ chainId: CELO_CHAIN_ID_HEX }]
         })
+        chainId = CELO_CHAIN_ID_HEX
       }
 
       const [addr] = await window.ethereum.request({ method: 'eth_requestAccounts' })
       setAccount(addr)
+      setNetworkName(getNetworkLabel(chainId))
     } catch (e: any) {
-      setError(e?.message || 'Falha ao conectar carteira.')
+      setError(e?.message || 'Failed to connect wallet.')
     }
   }
 
@@ -98,7 +118,11 @@ export function App() {
 
     if (!window.ethereum || !account) return
     if (!token || !token.address || !CONTRACT_ADDRESS) {
-      setError('Configure VITE_USDC_ADDRESS, VITE_USDT_ADDRESS e VITE_CONTRACT_ADDRESS.')
+      setError('Set VITE_USDC_ADDRESS, VITE_USDT_ADDRESS and VITE_CONTRACT_ADDRESS.')
+      return
+    }
+    if (!amount || Number(amount) <= 0) {
+      setError('Enter a valid amount.')
       return
     }
 
@@ -114,7 +138,7 @@ export function App() {
         transport: http()
       })
 
-      const amount = parseUnits(value, token.decimals)
+      const parsedAmount = parseUnits(amount, token.decimals)
       const reference = randomReference()
       const accountAddress = account as `0x${string}`
       const tokenAddress = token.address as `0x${string}`
@@ -125,7 +149,7 @@ export function App() {
         address: tokenAddress,
         abi: ERC20_ABI,
         functionName: 'approve',
-        args: [contractAddress, amount]
+        args: [contractAddress, parsedAmount]
       })
       await publicClient.waitForTransactionReceipt({ hash: approveHash })
 
@@ -134,13 +158,13 @@ export function App() {
         address: contractAddress,
         abi: VAULT_ABI,
         functionName: 'pay',
-        args: [tokenAddress, amount, reference, note]
+        args: [tokenAddress, parsedAmount, reference, note]
       })
 
       await publicClient.waitForTransactionReceipt({ hash: payHash })
       setTxHash(payHash)
     } catch (e: any) {
-      setError(e?.shortMessage || e?.message || 'Falha ao enviar pagamento.')
+      setError(e?.shortMessage || e?.message || 'Payment failed.')
     } finally {
       setLoading(false)
     }
@@ -155,20 +179,40 @@ export function App() {
         </div>
 
         <h1>{APP_NAME}</h1>
-        <p className="subtitle">Recarga e pagamento estavel em USDC/USDT com comprovante onchain.</p>
+        <p className="subtitle">Stablecoin top up and payments in USDC/USDT with onchain receipt.</p>
 
-        <button onClick={connect} className="primary ghost">
-          {account ? `Conectado: ${shortAddress(account)}` : 'Conectar MiniPay'}
-        </button>
+        <div className="walletCard">
+          <div className="walletRow">
+            <span>Wallet</span>
+            <strong>{walletName}</strong>
+          </div>
+          <div className="walletRow">
+            <span>Network</span>
+            <strong>{networkName}</strong>
+          </div>
+          <div className="walletRow">
+            <span>Address</span>
+            <strong>{account ? shortAddress(account) : 'Not connected'}</strong>
+          </div>
+          <button onClick={connect} className="primary ghost">
+            {account ? 'Reconnect Wallet' : 'Connect MiniPay / Wallet'}
+          </button>
+        </div>
 
-        <label>Valor (BRL)</label>
+        <label>Amount ({tokenSymbol})</label>
         <div className="row">
-          {BRL_VALUES.map((v) => (
-            <button key={v} className={value === v ? 'chip selected' : 'chip'} onClick={() => setValue(v)}>
-              R$ {v}
+          {QUICK_AMOUNTS.map((v) => (
+            <button key={v} className={amount === v ? 'chip selected' : 'chip'} onClick={() => setAmount(v)}>
+              {v} {tokenSymbol}
             </button>
           ))}
         </div>
+        <input
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value.replace(/,/g, '.'))}
+          placeholder={`Enter ${tokenSymbol} amount`}
+        />
 
         <label>Token</label>
         <select value={tokenSymbol} onChange={(e) => setTokenSymbol(e.target.value)}>
@@ -179,20 +223,20 @@ export function App() {
           ))}
         </select>
 
-        <label>Descricao</label>
+        <label>Description</label>
         <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={120} />
 
         <button disabled={!account || loading} onClick={pay} className="primary">
-          {loading ? 'Processando transacao...' : 'Pagar Agora'}
+          {loading ? 'Processing transaction...' : `Pay ${amount || '0'} ${tokenSymbol}`}
         </button>
 
         {txHash && (
           <div className="txCard">
-            <p className="txTitle">Pagamento confirmado</p>
+            <p className="txTitle">Payment confirmed</p>
             <p className="txHash">{txHash}</p>
             <div className="txActions">
-              <button className="secondary" onClick={copyTxHash}>{copied ? 'Copiado' : 'Copiar hash'}</button>
-              <a className="secondary link" href={txUrl} target="_blank" rel="noreferrer">Ver no CeloScan</a>
+              <button className="secondary" onClick={copyTxHash}>{copied ? 'Copied' : 'Copy hash'}</button>
+              <a className="secondary link" href={txUrl} target="_blank" rel="noreferrer">View on CeloScan</a>
             </div>
           </div>
         )}
