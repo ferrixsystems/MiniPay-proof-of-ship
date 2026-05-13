@@ -1,5 +1,7 @@
 import { formatUnits } from 'viem'
 
+export type WalletTarget = 'minipay' | 'browser'
+
 export function shortAddress(value: string) {
   return `${value.slice(0, 6)}...${value.slice(-4)}`
 }
@@ -49,6 +51,25 @@ export function timeAgo(fromMs: number, nowMs: number) {
   if (min < 60) return `${min}m ago`
   const hr = Math.floor(min / 60)
   return `${hr}h ago`
+}
+
+export function listInjectedProviders(ethereum: any): any[] {
+  if (!ethereum) return []
+  if (Array.isArray(ethereum.providers) && ethereum.providers.length > 0) return ethereum.providers
+  return [ethereum]
+}
+
+export function pickWalletProvider(ethereum: any, target: WalletTarget): any | null {
+  const providers = listInjectedProviders(ethereum)
+  if (providers.length === 0) return null
+
+  if (target === 'minipay') {
+    const miniPay = providers.find((provider) => provider?.isMiniPay)
+    return miniPay || null
+  }
+
+  const browserWallet = providers.find((provider) => !provider?.isMiniPay)
+  return browserWallet || providers[0]
 }
 
 export function getNetworkLabel(chainId: string): string {
