@@ -59,7 +59,7 @@ const VAULT_ABI = [
 
 const QUICK_AMOUNTS = ['1', '5', '10', '20']
 const AUTO_REFRESH_MS = 8_000
-const INITIAL_BLOCK_WINDOW = 20_000n
+const INITIAL_BLOCK_WINDOW = BigInt(import.meta.env.VITE_FEED_INITIAL_BLOCK_WINDOW || '300000')
 const LOG_CHUNK_SIZE = 2_000n
 const SLIDES_PER_PAGE = 4
 const SLIDE_MS = 3000
@@ -109,6 +109,16 @@ export function App() {
     TOKENS.forEach((t) => map.set(t.address.toLowerCase(), t))
     return map
   }, [])
+
+  const rpcEndpoints = useMemo(() => {
+    const endpoints = CELO_RPC_URL ? [CELO_RPC_URL, ...DEFAULT_CELO_RPCS] : DEFAULT_CELO_RPCS
+    return Array.from(new Set(endpoints))
+  }, [])
+
+  const rpcClients = useMemo(
+    () => rpcEndpoints.map((url) => createPublicClient({ chain: celo, transport: http(url) })),
+    [rpcEndpoints]
+  )
 
   const topSenders = useMemo(() => {
     if (!token?.address) return []
@@ -403,8 +413,26 @@ export function App() {
     }
 
     let active = true
-    const publicClient = createCeloClient()
     const contractAddress = CONTRACT_ADDRESS as `0x${string}`
+    let rpcCursor = 0
+
+    async function withRpcFallback<T>(operation: (client: any) => Promise<T>) {
+      let lastError: unknown
+
+      for (let i = 0; i < rpcClients.length; i++) {
+        const idx = (rpcCursor + i) % rpcClients.length
+        const client = rpcClients[idx]
+        try {
+          const result = await operation(client)
+          rpcCursor = idx
+          return result
+        } catch (error) {
+          lastError = error
+        }
+      }
+
+      throw lastError || new Error('All RPC endpoints failed.')
+    }
 
     async function fetchLogsInChunks(fromBlock: bigint, toBlock: bigint) {
       const chunks: any[] = []
@@ -412,12 +440,14 @@ export function App() {
 
       while (cursor <= toBlock) {
         const end = cursor + LOG_CHUNK_SIZE - 1n > toBlock ? toBlock : cursor + LOG_CHUNK_SIZE - 1n
-        const logs = await publicClient.getLogs({
-          address: contractAddress,
-          event: VAULT_ABI[0],
-          fromBlock: cursor,
-          toBlock: end
-        })
+        const logs = await withRpcFallback<any[]>((client) =>
+          client.getLogs({
+            address: contractAddress,
+            event: VAULT_ABI[0],
+            fromBlock: cursor,
+            toBlock: end
+          })
+        )
         chunks.push(...logs)
         cursor = end + 1n
       }
@@ -438,7 +468,7 @@ export function App() {
       const blockTimeMap = new Map<bigint, number>()
       await Promise.all(
         uniqueBlocks.map(async (blockNumber) => {
-          const block = await publicClient.getBlock({ blockNumber })
+          const block = await withRpcFallback<any>((client) => client.getBlock({ blockNumber }))
           blockTimeMap.set(blockNumber, Number(block.timestamp) * 1000)
         })
       )
@@ -468,7 +498,7 @@ export function App() {
         setFeedStatus('syncing')
         setFeedError('')
 
-        const latestBlock = await publicClient.getBlockNumber()
+        const latestBlock = await withRpcFallback<bigint>((client) => client.getBlockNumber())
         const fromBlock = latestBlock > INITIAL_BLOCK_WINDOW ? latestBlock - INITIAL_BLOCK_WINDOW : 0n
 
         const logs = await fetchLogsInChunks(fromBlock, latestBlock)
@@ -490,7 +520,7 @@ export function App() {
 
     async function pollNew() {
       try {
-        const latestBlock = await publicClient.getBlockNumber()
+        const latestBlock = await withRpcFallback<bigint>((client) => client.getBlockNumber())
         const lastScanned = lastScannedBlockRef.current
 
         if (lastScanned === null || latestBlock <= lastScanned) {
@@ -532,7 +562,7 @@ export function App() {
       active = false
       clearInterval(interval)
     }
-  }, [])
+  }, [rpcClients])
 
   return (
     <main className="container">

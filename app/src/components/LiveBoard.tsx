@@ -98,7 +98,7 @@ export function LiveBoard(props: LiveBoardProps) {
             ) : (
               <div className="slideTrack" style={{ transform: `translateX(-${slideIndex * 100}%)` }}>
                 {pages.map((group, idx) => (
-                  <div className="slidePage" key={idx}>
+                  <div className={`slidePage ${group.length === 1 ? 'single' : ''}`} key={idx}>
                     {group.map((payment) => {
                       const tokenMeta = tokenByAddress.get(payment.token.toLowerCase())
                       const symbol = tokenMeta?.symbol || 'TOKEN'
