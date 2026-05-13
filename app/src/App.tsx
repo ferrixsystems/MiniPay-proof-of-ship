@@ -3,7 +3,8 @@ import { createPublicClient, createWalletClient, custom, http, parseUnits } from
 import { celo } from 'viem/chains'
 import { APP_NAME, CELO_CHAIN_ID_HEX, CONTRACT_ADDRESS, TOKENS } from './lib/config'
 import type { ConnectStep, FeedStatus, LivePayment, TokenMeta } from './lib/types'
-import { buildPaymentLink, getWalletName, getNetworkLabel, isAddress, randomReference, sanitizeAmount, toUserError } from './lib/utils'
+import { buildPaymentLink, getWalletName, getNetworkLabel, isAddress, pickWalletProvider, randomReference, sanitizeAmount, toUserError } from './lib/utils'
+import type { WalletTarget } from './lib/utils'
 import { ConnectModal } from './components/ConnectModal'
 import { LiveBoard } from './components/LiveBoard'
 import { PaymentForm } from './components/PaymentForm'
@@ -59,6 +60,7 @@ const VAULT_ABI = [
 const QUICK_AMOUNTS = ['1', '5', '10', '20']
 const AUTO_REFRESH_MS = 8_000
 const INITIAL_BLOCK_WINDOW = 20_000n
+const LOG_CHUNK_SIZE = 2_000n
 const SLIDES_PER_PAGE = 4
 const SLIDE_MS = 3000
 
@@ -69,6 +71,7 @@ export function App() {
   const [note, setNote] = useState('Top up via Celo Stable Pay')
   const [walletName, setWalletName] = useState('Not connected')
   const [networkName, setNetworkName] = useState('Unknown')
+  const [activeProvider, setActiveProvider] = useState<any>(null)
   const [txHash, setTxHash] = useState('')
   const [loading, setLoading] = useState(false)
   const [connecting, setConnecting] = useState(false)
@@ -130,7 +133,7 @@ export function App() {
     setConnectModalOpen(true)
   }
 
-  async function connectWallet() {
+  async function connectWallet(target: WalletTarget) {
     setError('')
     if (!window.ethereum) {
       setError('MiniPay or browser wallet extension was not found.')
@@ -140,17 +143,24 @@ export function App() {
     setConnecting(true)
     setConnectStep('confirming')
     try {
-      setWalletName(getWalletName(window.ethereum))
+      const provider = pickWalletProvider(window.ethereum, target)
+      if (!provider) {
+        setError(target === 'minipay' ? 'MiniPay provider not found on this device/browser.' : 'No compatible browser wallet found.')
+        return
+      }
 
-      let chainId = await window.ethereum.request({ method: 'eth_chainId' })
+      setWalletName(getWalletName(provider))
+
+      let chainId = await provider.request({ method: 'eth_chainId' })
       if (chainId !== CELO_CHAIN_ID_HEX) {
-        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CELO_CHAIN_ID_HEX }] })
+        await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CELO_CHAIN_ID_HEX }] })
         chainId = CELO_CHAIN_ID_HEX
       }
 
-      const [addr] = await window.ethereum.request({ method: 'eth_requestAccounts' })
+      const [addr] = await provider.request({ method: 'eth_requestAccounts' })
       setAccount(addr)
       setNetworkName(getNetworkLabel(chainId))
+      setActiveProvider(provider)
       setConnectModalOpen(false)
     } catch (e: any) {
       setError(toUserError(e))
@@ -218,7 +228,8 @@ export function App() {
     setError('')
     setTxHash('')
 
-    if (!window.ethereum || !account) return
+    const provider = activeProvider || window.ethereum
+    if (!provider || !account) return
     if (!token || !token.address || !CONTRACT_ADDRESS) {
       setError('Set VITE_USDC_ADDRESS, VITE_USDT_ADDRESS and VITE_CONTRACT_ADDRESS.')
       return
@@ -230,7 +241,7 @@ export function App() {
 
     setLoading(true)
     try {
-      const walletClient = createWalletClient({ chain: celo, transport: custom(window.ethereum) })
+      const walletClient = createWalletClient({ chain: celo, transport: custom(provider) })
       const publicClient = createPublicClient({ chain: celo, transport: http() })
 
       const parsedAmount = parseUnits(amount, token.decimals)
@@ -312,6 +323,25 @@ export function App() {
     const publicClient = createPublicClient({ chain: celo, transport: http() })
     const contractAddress = CONTRACT_ADDRESS as `0x${string}`
 
+    async function fetchLogsInChunks(fromBlock: bigint, toBlock: bigint) {
+      const chunks: any[] = []
+      let cursor = fromBlock
+
+      while (cursor <= toBlock) {
+        const end = cursor + LOG_CHUNK_SIZE - 1n > toBlock ? toBlock : cursor + LOG_CHUNK_SIZE - 1n
+        const logs = await publicClient.getLogs({
+          address: contractAddress,
+          event: VAULT_ABI[0],
+          fromBlock: cursor,
+          toBlock: end
+        })
+        chunks.push(...logs)
+        cursor = end + 1n
+      }
+
+      return chunks
+    }
+
     async function mapLogs(logs: any[]): Promise<LivePayment[]> {
       const uniqueBlocks = Array.from(
         new Set(
@@ -358,12 +388,7 @@ export function App() {
         const latestBlock = await publicClient.getBlockNumber()
         const fromBlock = latestBlock > INITIAL_BLOCK_WINDOW ? latestBlock - INITIAL_BLOCK_WINDOW : 0n
 
-        const logs = await publicClient.getLogs({
-          address: contractAddress,
-          event: VAULT_ABI[0],
-          fromBlock,
-          toBlock: latestBlock
-        })
+        const logs = await fetchLogsInChunks(fromBlock, latestBlock)
 
         const mapped = await mapLogs(logs)
         mapped.sort((a, b) => (a.blockNumber === b.blockNumber ? b.logIndex - a.logIndex : a.blockNumber > b.blockNumber ? -1 : 1))
@@ -391,12 +416,7 @@ export function App() {
           return
         }
 
-        const logs = await publicClient.getLogs({
-          address: contractAddress,
-          event: VAULT_ABI[0],
-          fromBlock: lastScanned + 1n,
-          toBlock: latestBlock
-        })
+        const logs = await fetchLogsInChunks(lastScanned + 1n, latestBlock)
 
         const mapped = await mapLogs(logs)
         if (!active) return
