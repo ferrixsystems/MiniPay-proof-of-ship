@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPublicClient, createWalletClient, custom, http, parseUnits } from 'viem'
+import { createPublicClient, createWalletClient, custom, fallback, http, parseUnits } from 'viem'
 import { celo } from 'viem/chains'
-import { APP_NAME, CELO_CHAIN_ID_HEX, CONTRACT_ADDRESS, TOKENS } from './lib/config'
+import { APP_NAME, CELO_CHAIN_ID_HEX, CELO_RPC_URL, CONTRACT_ADDRESS, TOKENS } from './lib/config'
 import type { ConnectStep, FeedStatus, LivePayment, TokenMeta } from './lib/types'
 import { buildPaymentLink, getWalletName, getNetworkLabel, isAddress, pickWalletProvider, randomReference, sanitizeAmount, toUserError } from './lib/utils'
 import type { WalletTarget } from './lib/utils'
@@ -63,6 +63,10 @@ const INITIAL_BLOCK_WINDOW = 20_000n
 const LOG_CHUNK_SIZE = 2_000n
 const SLIDES_PER_PAGE = 4
 const SLIDE_MS = 3000
+const CELO_CHAIN_ID_DEC = 42220
+const WALLETCONNECT_PROJECT_ID = (import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '').trim()
+const DEFAULT_CELO_RPCS = ['https://forno.celo.org', 'https://rpc.ankr.com/celo', 'https://1rpc.io/celo']
+const WALLETCONNECT_TIMEOUT_MS = 20_000
 
 export function App() {
   const [account, setAccount] = useState('')
@@ -81,6 +85,7 @@ export function App() {
   const [error, setError] = useState('')
   const [connectModalOpen, setConnectModalOpen] = useState(false)
   const [connectStep, setConnectStep] = useState<ConnectStep>('select')
+  const [walletConnectUri, setWalletConnectUri] = useState('')
 
   const [livePayments, setLivePayments] = useState<LivePayment[]>([])
   const [feedStatus, setFeedStatus] = useState<FeedStatus>('idle')
@@ -90,6 +95,8 @@ export function App() {
   const [slideIndex, setSlideIndex] = useState(0)
 
   const lastScannedBlockRef = useRef<bigint | null>(null)
+  const walletConnectProviderRef = useRef<any>(null)
+  const walletConnectInitRef = useRef<Promise<any> | null>(null)
 
   const token = useMemo(() => TOKENS.find((t) => t.symbol === tokenSymbol), [tokenSymbol])
   const txUrl = txHash ? `https://celoscan.io/tx/${txHash}` : ''
@@ -127,15 +134,74 @@ export function App() {
 
   const pageCount = Math.max(1, pages.length)
 
+  function createCeloClient() {
+    const endpoints = CELO_RPC_URL ? [CELO_RPC_URL, ...DEFAULT_CELO_RPCS] : DEFAULT_CELO_RPCS
+    const unique = Array.from(new Set(endpoints))
+    return createPublicClient({
+      chain: celo,
+      transport: fallback(unique.map((url) => http(url)))
+    })
+  }
+
   function openConnectModal() {
     setError('')
     setConnectStep('select')
+    setWalletConnectUri('')
     setConnectModalOpen(true)
+  }
+
+  function closeConnectModal() {
+    setConnectModalOpen(false)
+    setConnectStep('select')
+    setWalletConnectUri('')
+  }
+
+  async function initWalletConnectProvider() {
+    if (!WALLETCONNECT_PROJECT_ID) {
+      throw new Error('Set VITE_WALLETCONNECT_PROJECT_ID to enable WalletConnect QR.')
+    }
+
+    if (walletConnectProviderRef.current) return walletConnectProviderRef.current
+    if (walletConnectInitRef.current) return walletConnectInitRef.current
+
+    walletConnectInitRef.current = (async () => {
+      const { default: EthereumProvider } = await import('@walletconnect/ethereum-provider')
+      const provider = await EthereumProvider.init({
+        projectId: WALLETCONNECT_PROJECT_ID,
+        chains: [CELO_CHAIN_ID_DEC],
+        optionalChains: [CELO_CHAIN_ID_DEC],
+        showQrModal: true,
+        methods: ['eth_sendTransaction', 'eth_signTransaction', 'eth_sign', 'personal_sign', 'eth_signTypedData'],
+        optionalMethods: ['wallet_switchEthereumChain', 'wallet_addEthereumChain'],
+        optionalEvents: ['chainChanged', 'accountsChanged', 'disconnect'],
+        metadata: {
+          name: APP_NAME,
+          description: 'Celo stablecoin checkout with onchain receipts',
+          url: window.location.origin,
+          icons: [`${window.location.origin}/image.png`]
+        }
+      })
+
+      // Keep latest URI so we can always render QR in-app if popup/modal fails to appear.
+      provider.on('display_uri', (uri: string) => {
+        setWalletConnectUri(uri)
+        setConnectStep('confirming')
+      })
+
+      walletConnectProviderRef.current = provider
+      return provider
+    })()
+
+    try {
+      return await walletConnectInitRef.current
+    } finally {
+      walletConnectInitRef.current = null
+    }
   }
 
   async function connectWallet(target: WalletTarget) {
     setError('')
-    if (!window.ethereum) {
+    if (target !== 'walletconnect' && !window.ethereum) {
       setError('MiniPay or browser wallet extension was not found.')
       return
     }
@@ -143,13 +209,29 @@ export function App() {
     setConnecting(true)
     setConnectStep('confirming')
     try {
-      const provider = pickWalletProvider(window.ethereum, target)
-      if (!provider) {
-        setError(target === 'minipay' ? 'MiniPay provider not found on this device/browser.' : 'No compatible browser wallet found.')
-        return
+      let provider: any
+      if (target === 'walletconnect') {
+        provider = await initWalletConnectProvider()
+        setWalletConnectUri('')
+        await Promise.race([
+          provider.enable(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('WalletConnect QR did not initialize. Check your Project ID and internet.')), WALLETCONNECT_TIMEOUT_MS)
+          )
+        ])
+      } else {
+        provider = pickWalletProvider(window.ethereum, target)
+        if (!provider) {
+          setError(
+            target === 'minipay'
+              ? 'MiniPay provider not found. Open this app inside MiniPay or use WalletConnect.'
+              : 'No compatible browser wallet found.'
+          )
+          return
+        }
       }
 
-      setWalletName(getWalletName(provider))
+      setWalletName(target === 'walletconnect' ? 'WalletConnect' : getWalletName(provider))
 
       let chainId = await provider.request({ method: 'eth_chainId' })
       if (chainId !== CELO_CHAIN_ID_HEX) {
@@ -161,12 +243,13 @@ export function App() {
       setAccount(addr)
       setNetworkName(getNetworkLabel(chainId))
       setActiveProvider(provider)
-      setConnectModalOpen(false)
+      closeConnectModal()
     } catch (e: any) {
       setError(toUserError(e))
+      setConnectStep('select')
+      setWalletConnectUri('')
     } finally {
       setConnecting(false)
-      setConnectStep('select')
     }
   }
 
@@ -242,7 +325,7 @@ export function App() {
     setLoading(true)
     try {
       const walletClient = createWalletClient({ chain: celo, transport: custom(provider) })
-      const publicClient = createPublicClient({ chain: celo, transport: http() })
+      const publicClient = createCeloClient()
 
       const parsedAmount = parseUnits(amount, token.decimals)
       const reference = randomReference()
@@ -320,7 +403,7 @@ export function App() {
     }
 
     let active = true
-    const publicClient = createPublicClient({ chain: celo, transport: http() })
+    const publicClient = createCeloClient()
     const contractAddress = CONTRACT_ADDRESS as `0x${string}`
 
     async function fetchLogsInChunks(fromBlock: bigint, toBlock: bigint) {
@@ -537,7 +620,8 @@ export function App() {
         open={connectModalOpen}
         connecting={connecting}
         step={connectStep}
-        onClose={() => setConnectModalOpen(false)}
+        walletConnectUri={walletConnectUri}
+        onClose={closeConnectModal}
         onConnectChoice={connectWallet}
       />
     </main>
