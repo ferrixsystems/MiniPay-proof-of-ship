@@ -1,6 +1,6 @@
 import { formatUnits } from 'viem'
 
-export type WalletTarget = 'minipay' | 'browser'
+export type WalletTarget = 'minipay' | 'browser' | 'walletconnect'
 
 export function shortAddress(value: string) {
   return `${value.slice(0, 6)}...${value.slice(-4)}`
