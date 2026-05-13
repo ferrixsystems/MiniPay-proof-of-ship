@@ -1,11 +1,12 @@
 import type { ConnectStep } from '../lib/types'
+import type { WalletTarget } from '../lib/utils'
 
 type ConnectModalProps = {
   open: boolean
   connecting: boolean
   step: ConnectStep
   onClose: () => void
-  onConnectChoice: () => void
+  onConnectChoice: (target: WalletTarget) => void
 }
 
 export function ConnectModal(props: ConnectModalProps) {
@@ -29,18 +30,18 @@ export function ConnectModal(props: ConnectModalProps) {
           <>
             <p className="modalSub">Choose your wallet to continue on Celo Mainnet.</p>
             <div className="walletChoices">
-              <button className="walletChoice" onClick={onConnectChoice}>
+              <button className="walletChoice" onClick={() => onConnectChoice('minipay')}>
                 <span>◉</span>
                 <div>
-                  <strong>MiniPay / Injected</strong>
-                  <small>Best for mobile-first flow</small>
+                  <strong>MiniPay</strong>
+                  <small>Force MiniPay provider</small>
                 </div>
               </button>
-              <button className="walletChoice" onClick={onConnectChoice}>
+              <button className="walletChoice" onClick={() => onConnectChoice('browser')}>
                 <span>◉</span>
                 <div>
                   <strong>Rabby / MetaMask</strong>
-                  <small>Desktop browser extension</small>
+                  <small>Use browser extension wallet</small>
                 </div>
               </button>
             </div>
