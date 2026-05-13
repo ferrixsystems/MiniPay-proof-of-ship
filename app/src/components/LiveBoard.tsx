@@ -93,7 +93,7 @@ export function LiveBoard(props: LiveBoardProps) {
               <div className="emptyFeed">
                 <div className="emptyPulse" />
                 <strong>No payments detected yet</strong>
-                <span>Send a test payment to populate the live stream and sender ranking.</span>
+                <span>This stream only shows onchain events emitted by your configured vault contract.</span>
               </div>
             ) : (
               <div className="slideTrack" style={{ transform: `translateX(-${slideIndex * 100}%)` }}>
