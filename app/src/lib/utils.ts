@@ -55,3 +55,21 @@ export function getNetworkLabel(chainId: string): string {
   if (chainId?.toLowerCase() === '0xa4ec') return 'Celo Mainnet'
   return `Chain ${chainId}`
 }
+
+export function sanitizeAmount(value: string) {
+  const normalized = value.replace(/,/g, '.').trim()
+  if (!normalized || Number(normalized) <= 0) return ''
+  return normalized
+}
+
+export function buildPaymentLink(amount: string, token: string, note: string) {
+  const url = new URL(`${window.location.origin}${window.location.pathname}`)
+  const cleanAmount = sanitizeAmount(amount)
+  if (cleanAmount) url.searchParams.set('amount', cleanAmount)
+  else url.searchParams.delete('amount')
+  url.searchParams.set('token', token)
+  url.searchParams.set('view', 'request')
+  if (note.trim()) url.searchParams.set('note', note.trim())
+  else url.searchParams.delete('note')
+  return url.toString()
+}

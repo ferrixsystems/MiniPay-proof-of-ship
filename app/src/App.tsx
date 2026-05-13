@@ -3,7 +3,7 @@ import { createPublicClient, createWalletClient, custom, http, parseUnits } from
 import { celo } from 'viem/chains'
 import { APP_NAME, CELO_CHAIN_ID_HEX, CONTRACT_ADDRESS, TOKENS } from './lib/config'
 import type { ConnectStep, FeedStatus, LivePayment, TokenMeta } from './lib/types'
-import { getWalletName, getNetworkLabel, isAddress, randomReference, toUserError } from './lib/utils'
+import { buildPaymentLink, getWalletName, getNetworkLabel, isAddress, randomReference, sanitizeAmount, toUserError } from './lib/utils'
 import { ConnectModal } from './components/ConnectModal'
 import { LiveBoard } from './components/LiveBoard'
 import { PaymentForm } from './components/PaymentForm'
@@ -73,6 +73,8 @@ export function App() {
   const [loading, setLoading] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
+  const [requestLoaded, setRequestLoaded] = useState(false)
   const [error, setError] = useState('')
   const [connectModalOpen, setConnectModalOpen] = useState(false)
   const [connectStep, setConnectStep] = useState<ConnectStep>('select')
@@ -89,6 +91,8 @@ export function App() {
   const token = useMemo(() => TOKENS.find((t) => t.symbol === tokenSymbol), [tokenSymbol])
   const txUrl = txHash ? `https://celoscan.io/tx/${txHash}` : ''
   const connected = Boolean(account)
+  const paymentLink = useMemo(() => buildPaymentLink(amount, tokenSymbol, note), [amount, note, tokenSymbol])
+  const paymentLinkReady = Boolean(sanitizeAmount(amount))
 
   const tokenByAddress = useMemo(() => {
     const map = new Map<string, TokenMeta>()
@@ -163,6 +167,53 @@ export function App() {
     setTimeout(() => setCopied(false), 1500)
   }
 
+  async function copyPaymentLink() {
+    if (!paymentLinkReady) {
+      setError('Enter a valid amount before copying a payment link.')
+      return
+    }
+
+    setError('')
+    await navigator.clipboard.writeText(paymentLink)
+    setLinkCopied(true)
+    setTimeout(() => setLinkCopied(false), 1500)
+  }
+
+  async function sharePaymentLink() {
+    if (!paymentLinkReady) {
+      setError('Enter a valid amount before sharing a payment link.')
+      return
+    }
+
+    try {
+      setError('')
+      const title = `${APP_NAME} payment request`
+      const text = `Pay ${amount} ${tokenSymbol}${note ? ` - ${note}` : ''}`
+
+      if (navigator.share) {
+        await navigator.share({ title, text, url: paymentLink })
+        return
+      }
+
+      await navigator.clipboard.writeText(paymentLink)
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 1500)
+    } catch (e: any) {
+      const message = toUserError(e)
+      if (/canceled|cancelled/i.test(message)) return
+      setError(message)
+    }
+  }
+
+  function openPaymentLink() {
+    if (!paymentLinkReady) {
+      setError('Enter a valid amount before opening a payment link.')
+      return
+    }
+
+    window.open(paymentLink, '_blank', 'noopener,noreferrer')
+  }
+
   async function pay() {
     setError('')
     setTxHash('')
@@ -212,6 +263,28 @@ export function App() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const urlAmount = sanitizeAmount(params.get('amount') || '')
+    const urlToken = (params.get('token') || '').toUpperCase()
+    const urlNote = params.get('note')
+    const urlView = params.get('view')
+
+    if (urlAmount) setAmount(urlAmount)
+    if (TOKENS.some((t) => t.symbol === urlToken)) setTokenSymbol(urlToken)
+    if (urlNote) setNote(urlNote.slice(0, 120))
+    if (urlAmount || TOKENS.some((t) => t.symbol === urlToken) || urlNote || urlView === 'request') setRequestLoaded(true)
+  }, [])
+
+  useEffect(() => {
+    if (!requestLoaded) return
+    const id = setTimeout(() => {
+      const target = document.getElementById('pay-request-btn')
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 120)
+    return () => clearTimeout(id)
+  }, [requestLoaded])
 
   useEffect(() => {
     if (slideIndex > pageCount - 1) setSlideIndex(0)
@@ -360,64 +433,85 @@ export function App() {
 
   return (
     <main className="container">
-      <section className="card">
-        <div className="topbar">
-          <span className="network">Celo Mainnet</span>
-          <span className="tag">MiniPay Ready</span>
-        </div>
+      <div className="appFrame">
+        <section className="checkoutCard">
+          <div className="topbar">
+            <span className="network">Celo Mainnet</span>
+            <span className="tag">MiniPay Ready</span>
+          </div>
 
-        <div className="brandLine">
-          <h1>{APP_NAME}</h1>
-        </div>
-        <p className="subtitle">Stablecoin top-ups and payments in USDC/USDT with an onchain receipt.</p>
+          <div className="brandLine">
+            <img src="/image.png" alt="" className="brandImage" />
+            <div>
+              <h1>{APP_NAME}</h1>
+              <p className="subtitle">Stablecoin checkout for USDC/USDT payments with public onchain receipts.</p>
+            </div>
+          </div>
 
-        <PurposeBox />
+          <PurposeBox />
 
-        <WalletPanel
-          connected={connected}
-          account={account}
-          walletName={walletName}
-          networkName={networkName}
-          connecting={connecting}
-          onConnectClick={openConnectModal}
-        />
+          <div className="checkoutStack">
+            {requestLoaded && (
+              <div className="requestBanner">
+                <span>Payment request loaded from shared link</span>
+                <strong>{amount} {tokenSymbol}</strong>
+              </div>
+            )}
 
-        <PaymentForm
+            <WalletPanel
+              connected={connected}
+              account={account}
+              walletName={walletName}
+              networkName={networkName}
+              connecting={connecting}
+              onConnectClick={openConnectModal}
+            />
+
+            <PaymentForm
+              tokenSymbol={tokenSymbol}
+              tokens={TOKENS}
+              amount={amount}
+              note={note}
+              quickAmounts={QUICK_AMOUNTS}
+              loading={loading}
+              connected={connected}
+              paymentLink={paymentLink}
+              paymentLinkReady={paymentLinkReady}
+              linkCopied={linkCopied}
+              requestLoaded={requestLoaded}
+              onAmountSelect={setAmount}
+              onAmountChange={setAmount}
+              onTokenChange={setTokenSymbol}
+              onNoteChange={setNote}
+              onPay={pay}
+              onCopyPaymentLink={copyPaymentLink}
+              onSharePaymentLink={sharePaymentLink}
+              onOpenPaymentLink={openPaymentLink}
+            />
+
+            <TxReceipt txHash={txHash} txUrl={txUrl} copied={copied} onCopy={copyTxHash} />
+
+            {error && <p className="err">{error}</p>}
+          </div>
+        </section>
+
+        <LiveBoard
+          livePayments={livePayments}
+          pages={pages}
+          pageCount={pageCount}
+          slideIndex={slideIndex}
+          setSlideIndex={setSlideIndex}
+          feedStatus={feedStatus}
+          feedError={feedError}
+          autoRefreshSeconds={AUTO_REFRESH_MS / 1000}
+          lastRefreshAt={lastRefreshAt}
+          clock={clock}
+          tokenByAddress={tokenByAddress}
           tokenSymbol={tokenSymbol}
-          tokens={TOKENS}
-          amount={amount}
-          note={note}
-          quickAmounts={QUICK_AMOUNTS}
-          loading={loading}
-          connected={connected}
-          onAmountSelect={setAmount}
-          onAmountChange={setAmount}
-          onTokenChange={setTokenSymbol}
-          onNoteChange={setNote}
-          onPay={pay}
+          topSenders={topSenders}
+          token={token}
         />
-
-        <TxReceipt txHash={txHash} txUrl={txUrl} copied={copied} onCopy={copyTxHash} />
-
-        {error && <p className="err">{error}</p>}
-      </section>
-
-      <LiveBoard
-        livePayments={livePayments}
-        pages={pages}
-        pageCount={pageCount}
-        slideIndex={slideIndex}
-        setSlideIndex={setSlideIndex}
-        feedStatus={feedStatus}
-        feedError={feedError}
-        autoRefreshSeconds={AUTO_REFRESH_MS / 1000}
-        lastRefreshAt={lastRefreshAt}
-        clock={clock}
-        tokenByAddress={tokenByAddress}
-        tokenSymbol={tokenSymbol}
-        topSenders={topSenders}
-        token={token}
-      />
+      </div>
 
       <ConnectModal
         open={connectModalOpen}
