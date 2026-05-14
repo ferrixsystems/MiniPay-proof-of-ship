@@ -1,26 +1,27 @@
 export function PurposeBox() {
   return (
     <section className="purposeBox">
-      <h3>What this app does</h3>
+      <span className="eyebrow">Merchant checkout</span>
+      <h3>Accept stablecoin payments on Celo</h3>
       <p>
-        Celo Stable Pay is a simple checkout rail: users pay in USDC/USDT, merchants receive funds in treasury,
-        and every payment is publicly verifiable on CeloScan.
+        Create payment requests in USDC or USDT, route funds to your treasury, and give every payer a public
+        onchain receipt.
       </p>
       <div className="purposeSteps">
         <div>
           <span>1</span>
-          <strong>Connect wallet</strong>
-          <small>Use MiniPay or your browser wallet on Celo Mainnet.</small>
+          <strong>Create request</strong>
+          <small>Set amount, token and payment purpose.</small>
         </div>
         <div>
           <span>2</span>
-          <strong>Choose token & amount</strong>
-          <small>Select USDC or USDT and confirm payment.</small>
+          <strong>Share checkout</strong>
+          <small>Send a prefilled link to any Celo wallet user.</small>
         </div>
         <div>
           <span>3</span>
-          <strong>Get onchain proof</strong>
-          <small>Track every transaction live in the activity feed below.</small>
+          <strong>Track receipts</strong>
+          <small>Watch confirmed payments in the live activity panel.</small>
         </div>
       </div>
     </section>
