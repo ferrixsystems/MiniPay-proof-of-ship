@@ -18,6 +18,7 @@ type LiveBoardProps = {
   tokenSymbol: string
   topSenders: TopSender[]
   token?: TokenMeta
+  onRefresh: () => void
 }
 
 export function LiveBoard(props: LiveBoardProps) {
@@ -35,7 +36,8 @@ export function LiveBoard(props: LiveBoardProps) {
     tokenByAddress,
     tokenSymbol,
     topSenders,
-    token
+    token,
+    onRefresh
   } = props
 
   const selectedPayments = token
@@ -58,10 +60,17 @@ export function LiveBoard(props: LiveBoardProps) {
           <span>{feedStatus === 'syncing' ? 'Syncing...' : feedStatus === 'live' ? 'Live' : 'Offline'}</span>
           <span className="muted">Refresh {autoRefreshSeconds}s</span>
           {lastRefreshAt && <span className="muted">Updated {timeAgo(lastRefreshAt, clock)}</span>}
+          <button type="button" className="iconTextBtn" onClick={onRefresh}>
+            Refresh now
+          </button>
         </div>
       </div>
 
-      {feedError && <p className="err small">{feedError}</p>}
+      {feedError && (
+        <p className="feedNotice">
+          RPC temporarily unavailable. Showing the latest indexed data while the feed retries.
+        </p>
+      )}
 
       <div className="liveStats">
         <div>
