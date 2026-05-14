@@ -3,11 +3,22 @@ import { createPublicClient, createWalletClient, custom, fallback, http, parseUn
 import { celo } from 'viem/chains'
 import { APP_NAME, CELO_CHAIN_ID_HEX, CELO_RPC_URL, CONTRACT_ADDRESS, TOKENS } from './lib/config'
 import type { ConnectStep, FeedStatus, LivePayment, TokenMeta } from './lib/types'
-import { buildPaymentLink, getWalletName, getNetworkLabel, isAddress, pickWalletProvider, randomReference, sanitizeAmount, toUserError } from './lib/utils'
+import {
+  buildTokenTransferUri,
+  getWalletName,
+  getNetworkLabel,
+  isAddress,
+  pickWalletProvider,
+  randomReference,
+  sanitizeAmount,
+  toUserError
+} from './lib/utils'
 import type { WalletTarget } from './lib/utils'
 import { ConnectModal } from './components/ConnectModal'
+import { ContractStatus } from './components/ContractStatus'
 import { LiveBoard } from './components/LiveBoard'
 import { PaymentForm } from './components/PaymentForm'
+import { PaymentQrModal } from './components/PaymentQrModal'
 import { PurposeBox } from './components/PurposeBox'
 import { TxReceipt } from './components/TxReceipt'
 import { WalletPanel } from './components/WalletPanel'
@@ -54,6 +65,13 @@ const VAULT_ABI = [
       { name: 'note', type: 'string' }
     ],
     outputs: []
+  },
+  {
+    type: 'function',
+    name: 'treasury',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }]
   }
 ] as const
 
@@ -80,12 +98,13 @@ export function App() {
   const [loading, setLoading] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [linkCopied, setLinkCopied] = useState(false)
   const [requestLoaded, setRequestLoaded] = useState(false)
   const [error, setError] = useState('')
   const [connectModalOpen, setConnectModalOpen] = useState(false)
   const [connectStep, setConnectStep] = useState<ConnectStep>('select')
   const [walletConnectUri, setWalletConnectUri] = useState('')
+  const [paymentQrOpen, setPaymentQrOpen] = useState(false)
+  const [treasuryAddress, setTreasuryAddress] = useState('')
 
   const [livePayments, setLivePayments] = useState<LivePayment[]>([])
   const [feedStatus, setFeedStatus] = useState<FeedStatus>('idle')
@@ -93,6 +112,7 @@ export function App() {
   const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null)
   const [clock, setClock] = useState(Date.now())
   const [slideIndex, setSlideIndex] = useState(0)
+  const [feedRefreshNonce, setFeedRefreshNonce] = useState(0)
 
   const lastScannedBlockRef = useRef<bigint | null>(null)
   const walletConnectProviderRef = useRef<any>(null)
@@ -101,8 +121,11 @@ export function App() {
   const token = useMemo(() => TOKENS.find((t) => t.symbol === tokenSymbol), [tokenSymbol])
   const txUrl = txHash ? `https://celoscan.io/tx/${txHash}` : ''
   const connected = Boolean(account)
-  const paymentLink = useMemo(() => buildPaymentLink(amount, tokenSymbol, note), [amount, note, tokenSymbol])
-  const paymentLinkReady = Boolean(sanitizeAmount(amount))
+  const directPaymentUri = useMemo(() => {
+    const cleanAmount = sanitizeAmount(amount)
+    if (!token || !cleanAmount || !isAddress(token.address) || !isAddress(treasuryAddress)) return ''
+    return buildTokenTransferUri(token.address, treasuryAddress, parseUnits(cleanAmount, token.decimals), CELO_CHAIN_ID_DEC)
+  }, [amount, token, treasuryAddress])
 
   const tokenByAddress = useMemo(() => {
     const map = new Map<string, TokenMeta>()
@@ -270,53 +293,6 @@ export function App() {
     setTimeout(() => setCopied(false), 1500)
   }
 
-  async function copyPaymentLink() {
-    if (!paymentLinkReady) {
-      setError('Enter a valid amount before copying a payment link.')
-      return
-    }
-
-    setError('')
-    await navigator.clipboard.writeText(paymentLink)
-    setLinkCopied(true)
-    setTimeout(() => setLinkCopied(false), 1500)
-  }
-
-  async function sharePaymentLink() {
-    if (!paymentLinkReady) {
-      setError('Enter a valid amount before sharing a payment link.')
-      return
-    }
-
-    try {
-      setError('')
-      const title = `${APP_NAME} payment request`
-      const text = `Pay ${amount} ${tokenSymbol}${note ? ` - ${note}` : ''}`
-
-      if (navigator.share) {
-        await navigator.share({ title, text, url: paymentLink })
-        return
-      }
-
-      await navigator.clipboard.writeText(paymentLink)
-      setLinkCopied(true)
-      setTimeout(() => setLinkCopied(false), 1500)
-    } catch (e: any) {
-      const message = toUserError(e)
-      if (/canceled|cancelled/i.test(message)) return
-      setError(message)
-    }
-  }
-
-  function openPaymentLink() {
-    if (!paymentLinkReady) {
-      setError('Enter a valid amount before opening a payment link.')
-      return
-    }
-
-    window.open(paymentLink, '_blank', 'noopener,noreferrer')
-  }
-
   async function pay() {
     setError('')
     setTxHash('')
@@ -367,6 +343,33 @@ export function App() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!isAddress(CONTRACT_ADDRESS)) return
+
+    let active = true
+
+    async function loadTreasury() {
+      try {
+        const publicClient = createCeloClient()
+        const treasury = await publicClient.readContract({
+          address: CONTRACT_ADDRESS as `0x${string}`,
+          abi: VAULT_ABI,
+          functionName: 'treasury'
+        })
+
+        if (active && typeof treasury === 'string') setTreasuryAddress(treasury)
+      } catch {
+        if (active) setTreasuryAddress('')
+      }
+    }
+
+    loadTreasury()
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -562,7 +565,7 @@ export function App() {
       active = false
       clearInterval(interval)
     }
-  }, [rpcClients])
+  }, [rpcClients, feedRefreshNonce])
 
   return (
     <main className="container">
@@ -581,7 +584,16 @@ export function App() {
             </div>
           </div>
 
+          <div className="trustStrip">
+            <span>Celo Mainnet</span>
+            <span>USDC / USDT</span>
+            <a href={`https://celoscan.io/address/${CONTRACT_ADDRESS}`} target="_blank" rel="noreferrer">
+              Vault contract
+            </a>
+          </div>
+
           <PurposeBox />
+          <ContractStatus />
 
           <div className="checkoutStack">
             {requestLoaded && (
@@ -608,21 +620,23 @@ export function App() {
               quickAmounts={QUICK_AMOUNTS}
               loading={loading}
               connected={connected}
-              paymentLink={paymentLink}
-              paymentLinkReady={paymentLinkReady}
-              linkCopied={linkCopied}
-              requestLoaded={requestLoaded}
               onAmountSelect={setAmount}
               onAmountChange={setAmount}
               onTokenChange={setTokenSymbol}
               onNoteChange={setNote}
               onPay={pay}
-              onCopyPaymentLink={copyPaymentLink}
-              onSharePaymentLink={sharePaymentLink}
-              onOpenPaymentLink={openPaymentLink}
+              onPayWithQr={() => setPaymentQrOpen(true)}
             />
 
-            <TxReceipt txHash={txHash} txUrl={txUrl} copied={copied} onCopy={copyTxHash} />
+            <TxReceipt
+              txHash={txHash}
+              txUrl={txUrl}
+              amount={amount}
+              tokenSymbol={tokenSymbol}
+              note={note}
+              copied={copied}
+              onCopy={copyTxHash}
+            />
 
             {error && <p className="err">{error}</p>}
           </div>
@@ -643,6 +657,7 @@ export function App() {
           tokenSymbol={tokenSymbol}
           topSenders={topSenders}
           token={token}
+          onRefresh={() => setFeedRefreshNonce((value) => value + 1)}
         />
       </div>
 
@@ -653,6 +668,17 @@ export function App() {
         walletConnectUri={walletConnectUri}
         onClose={closeConnectModal}
         onConnectChoice={connectWallet}
+      />
+
+      <PaymentQrModal
+        open={paymentQrOpen}
+        amount={amount}
+        tokenSymbol={tokenSymbol}
+        note={note}
+        paymentUri={directPaymentUri}
+        tokenAddress={token?.address || ''}
+        recipientAddress={treasuryAddress}
+        onClose={() => setPaymentQrOpen(false)}
       />
     </main>
   )
