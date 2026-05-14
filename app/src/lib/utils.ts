@@ -94,3 +94,12 @@ export function buildPaymentLink(amount: string, token: string, note: string) {
   else url.searchParams.delete('note')
   return url.toString()
 }
+
+export function buildTokenTransferUri(tokenAddress: string, recipientAddress: string, amountBaseUnits: bigint, chainId: number) {
+  const params = new URLSearchParams({
+    address: recipientAddress,
+    uint256: amountBaseUnits.toString()
+  })
+
+  return `ethereum:${tokenAddress}@${chainId}/transfer?${params.toString()}`
+}
